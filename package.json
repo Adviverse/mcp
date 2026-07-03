@@ -1,0 +1,40 @@
+{
+  "name": "@adviverse/mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing the Adviverse ad network API as tools for AI agents.",
+  "license": "SEE LICENSE IN LICENSE",
+  "type": "module",
+  "bin": {
+    "adviverse-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@adviverse/sdk": "^0.1.0",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.8",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.2",
+    "@types/node": "^22.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Adviverse/mcp.git"
+  },
+  "homepage": "https://github.com/Adviverse/mcp#readme",
+  "bugs": {
+    "url": "https://github.com/Adviverse/mcp/issues"
+  }
+}
