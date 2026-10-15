@@ -1,57 +1,83 @@
-# @adviverse/mcp
+# @adnet/mcp — Adviverse MCP server
 
-An [MCP](https://modelcontextprotocol.io) server that exposes the
-[Adviverse](https://adviverse.com) ad network API as tools for AI agents —
-campaigns, creatives, audiences, the pixel, reporting, publisher properties &
-placements, agency clients & invoicing, and more.
+A [Model Context Protocol](https://modelcontextprotocol.io) server that lets AI
+agents manage an Adviverse account through a curated, typed toolset (backed by
+[`@adnet/sdk`](../../services/sdk)).
 
-Self-contained: it bundles [`@adviverse/sdk`](https://github.com/Adviverse/sdk)
-and its dependencies into a single file — runs with just Node, no install step
-at the call site.
+## What it exposes (20 tools)
 
-## Run
+- **Account** — `whoami`
+- **Campaigns** — `list_campaigns`, `get_campaign`, `create_campaign`, `update_campaign`, `submit_campaign`, `set_campaign_status`
+- **Creatives** — `list_creatives`, `create_creative`
+- **Inventory** — `list_properties`, `create_property`, `verify_property`, `list_placements`, `create_placement`, `get_placement_tag`
+- **Finance (read-only)** — `get_balance`, `list_ledger`
+- **Reporting** — `advertiser_report`, `publisher_report`
+- **Deals** — `list_deals`
 
-```bash
-# stdio (for a local MCP client like Claude Desktop / an IDE)
-npx @adviverse/mcp
-```
+Treasury moves (deposits/payouts) and API-key minting are intentionally **not**
+exposed — those stay human-gated in the dashboard.
 
-Provide your Adviverse credentials via environment variables:
+## Auth
 
-```bash
-ADVIVERSE_BASE_URL=https://adviverse.com
-ADVIVERSE_API_KEY=ak_...        # a scoped API key
-```
+Create a scoped key in the dashboard (**Settings → API keys**) — pick **Read-only**
+for a monitoring agent or **Read & write** for one that manages campaigns/inventory.
+The server reads it from the environment:
 
-### Claude Desktop / MCP client config
+| Env var | Required | Default |
+|---|---|---|
+| `ADVIVERSE_API_KEY` | yes | — (`ak_<prefix>.<secret>`) |
+| `ADVIVERSE_BASE_URL` | no | `https://adviverse.com` |
+
+A read-only key makes every mutating tool return a `403 missing scope: write` —
+scopes are enforced server-side.
+
+## Hosted (no install) — `https://mcp.adviverse.com/mcp`
+
+A multi-tenant Streamable-HTTP server is hosted for you. Point any remote-MCP
+client at the URL and pass **your own** key in the `Authorization` header — the
+server runs a per-session client bound to that key (keys are never shared):
 
 ```json
 {
   "mcpServers": {
     "adviverse": {
-      "command": "npx",
-      "args": ["-y", "@adviverse/mcp"],
-      "env": {
-        "ADVIVERSE_BASE_URL": "https://adviverse.com",
-        "ADVIVERSE_API_KEY": "ak_..."
-      }
+      "url": "https://mcp.adviverse.com/mcp",
+      "headers": { "Authorization": "Bearer ak_xxx.yyy" }
     }
   }
 }
 ```
 
-## HTTP mode
+No key → `401`. The hosted server (`src/http.ts`) talks to the control-plane
+internally; see `deploy/docker-compose.yml` for the service definition.
 
-The package also ships an HTTP entrypoint (`dist/http.js`) for hosting the server
-behind a URL (used for the managed endpoint at `mcp.adviverse.com`).
+## Run locally (stdio)
 
-## Tools
+```bash
+pnpm --filter @adnet/mcp build          # bundles standalone dist/index.js (stdio) + dist/http.js
+ADVIVERSE_API_KEY=ak_xxx.yyy node dist/index.js
+```
 
-The server curates a focused tool per API action (list/create/update campaigns,
-manage creatives & audiences, configure the pixel, pull reports, manage agency
-clients & invoices, etc.). The underlying HTTP client is
-[`@adviverse/sdk`](https://github.com/Adviverse/sdk).
+### Claude Desktop / other MCP clients
 
-## License
+```json
+{
+  "mcpServers": {
+    "adviverse": {
+      "command": "node",
+      "args": ["/abs/path/packages/mcp/dist/index.js"],
+      "env": { "ADVIVERSE_API_KEY": "ak_xxx.yyy" }
+    }
+  }
+}
+```
 
-Proprietary — see [LICENSE](LICENSE).
+The build is bundled (no `node_modules` needed at the run site), so the single
+`dist/index.js` is all you ship.
+
+## Regenerating against API changes
+
+The MCP is hand-curated on top of `@adnet/sdk`; the full machine-readable surface
+lives at `GET /v1/docs-json` (and Swagger UI at `/v1/docs`). Regenerate the spec
+with `pnpm --filter @adnet/control-plane openapi` if you want to codegen clients
+for the long-tail endpoints not surfaced here.
