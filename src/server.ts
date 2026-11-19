@@ -306,6 +306,7 @@ export function createServer(client: AdNetClient): McpServer {
       consentGrantValue: z.string().optional().describe('The value that means "ads allowed" for cookie/global sources (default "true").'),
       tcfPurpose: z.number().optional().describe('TCF purpose required for ads (default 1 = storage).'),
       tcfVendorId: z.number().optional().describe('Our IAB vendor id to require in the TCF string (optional).'),
+      contextualWithoutConsent: z.boolean().optional().describe('Ads always load: visitors who have not answered (or rejected) the CMP get contextual ads with no identifier; personalized still waits for consent.'),
     },
     (a) => client.consent.saveConfig(a),
   );
@@ -383,7 +384,7 @@ export function createServer(client: AdNetClient): McpServer {
   tool('property_mfa_score', "A property's Made-For-Advertising quality score + guidance.", { id: z.string() }, (a) => client.properties.mfa(a.id));
 
   /* ---- placements: update ---- */
-  tool('update_placement', 'Update a placement (partial fields: floorCpm, floorSoft, revShare, status, houseShare, …). Set floorAuto:true to let the yield optimizer manage floorCpm + floorSoft automatically from recent clearing prices (floorAuto:false = full manual control). autoAds tunes auto ads on a responsive banner placement (stored at settings.auto_ads, wins over the page\'s data-max): { enabled?, max?(1-10), every?(paragraphs between ads, 2-12), min_paragraph_chars?(0-2000), exclude_paths?["/checkout*"], selectors?[css] } — null clears.', { id: z.string(), fields }, (a) => client.placements.update(a.id, a.fields as UpdatePlacementRequest));
+  tool('update_placement', 'Update a placement (partial fields: floorCpm, floorSoft, revShare, status, houseShare, frequencyCap {impressions, windowSeconds} — {} or null removes it, …). Set floorAuto:true to let the yield optimizer manage floorCpm + floorSoft automatically from recent clearing prices (floorAuto:false = full manual control). autoAds tunes auto ads on a responsive banner placement (stored at settings.auto_ads, wins over the page\'s data-max): { enabled?, max?(1-10), every?(paragraphs between ads, 2-12), min_paragraph_chars?(0-2000), exclude_paths?["/checkout*"], selectors?[css] } — null clears.', { id: z.string(), fields }, (a) => client.placements.update(a.id, a.fields as UpdatePlacementRequest));
 
   /* ---- feeds (dynamic product ads) ---- */
   tool('list_feeds', 'List product feeds.', {}, () => client.feeds.list());
