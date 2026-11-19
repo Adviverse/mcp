@@ -91,8 +91,8 @@ export function createServer(client: AdNetClient): McpServer {
   /* ---- campaigns (advertiser) ---- */
   tool('list_campaigns', "List the advertiser account's campaigns.", page, (a) => client.campaigns.list(a));
   tool('get_campaign', 'Get one campaign by id.', { id: z.string() }, (a) => client.campaigns.get(a.id));
-  tool('create_campaign', 'Create a campaign. `fields` follows the API CreateCampaign body (name, format, pricingModel, bidAmount, budgetDaily, …). Optional `utm` object ({enabled,source,medium,campaign,content,term}) tags the landing URL for the advertiser\'s own analytics; omit for the default (enabled, auto values).', { fields, idempotencyKey: idem }, (a) => client.campaigns.create(a.fields as CreateCampaignRequest, a.idempotencyKey));
-  tool('update_campaign', 'Update a campaign (partial fields).', { id: z.string(), fields }, (a) => client.campaigns.update(a.id, a.fields as Partial<CreateCampaignRequest>));
+  tool('create_campaign', 'Create a campaign. `fields` follows the API CreateCampaign body (name, format, pricingModel, bidAmount, budgetDaily, …). Optional `utm` object ({enabled,source,medium,campaign,content,term}) tags the landing URL for the advertiser\'s own analytics; omit for the default (enabled, auto values). Routing booleans (both default true): `autoOwnPlacements` — a house/backfill-tier campaign also runs on every placement your account publishes, even if not on its placement whitelist; `networkExpansion` — smart routing weights delivery toward sites where similar ads perform well (false = pure targeting).', { fields, idempotencyKey: idem }, (a) => client.campaigns.create(a.fields as CreateCampaignRequest, a.idempotencyKey));
+  tool('update_campaign', 'Update a campaign (partial fields, incl. autoOwnPlacements / networkExpansion routing booleans).', { id: z.string(), fields }, (a) => client.campaigns.update(a.id, a.fields as Partial<CreateCampaignRequest>));
   tool('delete_campaign', 'Delete a campaign (soft-delete): stops serving and removes it from the list; past spend/stats stay in reporting.', { id: z.string() }, (a) => client.campaigns.remove(a.id));
   tool('submit_campaign', 'Submit a campaign for review.', { id: z.string() }, (a) => client.campaigns.submit(a.id));
   tool('set_campaign_status', 'Set a campaign status (e.g. active, paused).', { id: z.string(), status: z.string() }, (a) => client.campaigns.setStatus(a.id, a.status as Parameters<typeof client.campaigns.setStatus>[1]));
@@ -131,15 +131,18 @@ export function createServer(client: AdNetClient): McpServer {
   /* ---- properties (publisher inventory) ---- */
   tool('list_properties', 'List publisher properties (sites, CLIs, apps).', page, (a) => client.properties.list(a));
   tool('create_property', 'Register a property. fields: { kind: website|cli|mobile_app|ctv, domain, name?, verificationMethod? }.', { fields, idempotencyKey: idem }, (a) => client.properties.create(a.fields as CreatePropertyRequest, a.idempotencyKey));
-  tool('update_property', 'Update a property. fields: { name?, domain?, category?, verificationMethod? }. Changing the domain resets verification.', { id: z.string(), fields }, (a) => client.properties.update(a.id, a.fields as Parameters<typeof client.properties.update>[1]));
+  tool('update_property', 'Update a property. fields: { name?, domain?, category? (site-niche id from list_site_niches; manual, 0 = back to auto-detect), verificationMethod?, crossFill? }. Changing the domain resets verification and trust.', { id: z.string(), fields }, (a) => client.properties.update(a.id, a.fields as Parameters<typeof client.properties.update>[1]));
+  tool('get_property_ads_txt', "A property's ads.txt line(s), to publish at https://<domain>/ads.txt.", { id: z.string() }, (a) => client.properties.adsTxt(a.id));
   tool('verify_property', 'Trigger ownership verification for a property.', { id: z.string() }, (a) => client.properties.verify(a.id));
+  tool('classify_property', "Re-detect a website property's niche from its pages; returns the top-3 niches. Updates category only if it was auto-detected.", { id: z.string() }, (a) => client.properties.classify(a.id));
+  tool('list_site_niches', 'The site-niche taxonomy (IAB v1 tier-1 ids + names) used by property category and campaign targeting propertyCategoryInclude/Exclude.', {}, () => client.properties.niches());
   tool('set_serving_domain', 'Set a first-party ad-serving domain on a property (anti-adblock). The publisher CNAMEs this host to our edge; returns the CNAME target. Pass domain:null to remove.', { id: z.string(), domain: z.string().nullable() }, (a) => client.properties.setServingDomain(a.id, a.domain));
   tool('verify_serving_domain', 'Verify a property custom serving domain CNAMEs to our edge (routes traffic + proves control). On success the tag serves first-party.', { id: z.string() }, (a) => client.properties.verifyServingDomain(a.id));
 
   /* ---- placements ---- */
-  tool('list_placements', 'List ad placements.', page, (a) => client.placements.list(a));
+  tool('list_placements', 'List ad placements. has_signing_secret says whether signed-tag enforcement is on (the secret itself is only returned by rotate_placement_signing_secret).', page, (a) => client.placements.list(a));
   tool('create_placement', 'Create a placement. fields: { propertyId, name, format, floorCpm, … }.', { fields, idempotencyKey: idem }, (a) => client.placements.create(a.fields as CreatePlacementRequest, a.idempotencyKey));
-  tool('get_placement_tag', 'Get the ad tag / install code for a placement.', { id: z.string() }, (a) => client.placements.tag(a.id));
+  tool('get_placement_tag', 'Get the ad tag / install code for a placement (responsive banners also return autoAdsScript, the one-line site-wide auto-ads tag).', { id: z.string() }, (a) => client.placements.tag(a.id));
   tool('rotate_placement_signing_secret', 'Generate/rotate a placement signing secret (Layer 3, returned once). With a secret set, the engine only serves /terminal requests carrying a valid HMAC signature.', { id: z.string() }, (a) => client.placements.rotateSigningSecret(a.id));
   tool('disable_placement_signing', 'Disable signed-tag enforcement on a placement.', { id: z.string() }, (a) => client.placements.disableSigning(a.id));
 
@@ -154,7 +157,8 @@ export function createServer(client: AdNetClient): McpServer {
   /* ---- reporting ---- */
   tool('advertiser_report', 'Advertiser spend/performance report.', reportQuery, (a) => client.reporting.advertiser(a as ReportQuery));
   tool('publisher_report', 'Publisher revenue/delivery report.', reportQuery, (a) => client.reporting.publisher(a as ReportQuery));
-  tool('publisher_placements_report', 'Per-placement publisher rollup: impressions, clicks, CTR, revenue, RPM, eCPM, fill rate and viewable rate.', reportQuery, (a) => client.reporting.publisherPlacements(a as ReportQuery));
+  tool('publisher_placements_report', 'Per-placement publisher rollup: impressions, clicks, CTR, revenue, RPM, eCPM, fill rate, paid fill rate (paid_fill_rate: house/self-promo fills excluded), viewable rate, and layout shift the slot causes (cls_avg per measured impression, cls_poor_rate = share with CLS > 0.1; reserve the slot box size to fix).', reportQuery, (a) => client.reporting.publisherPlacements(a as ReportQuery));
+  tool('publisher_fill_report', 'Publisher fill summary: requests, filled, fill_rate, paid_filled + paid_fill_rate (paid demand only, house/self-promo excluded; rates are %), and no-fill counts by reason.', reportQuery, (a) => client.reporting.publisherFill(a as ReportQuery));
   tool('anti_adblock_report', 'Anti-adblock: impressions recovered from visitors running an adblocker (served first-party), with daily series + recovered %.', reportQuery, (a) => client.reporting.antiAdblock(a as ReportQuery));
 
   /* ---- deals (PMP) ---- */
@@ -379,7 +383,7 @@ export function createServer(client: AdNetClient): McpServer {
   tool('property_mfa_score', "A property's Made-For-Advertising quality score + guidance.", { id: z.string() }, (a) => client.properties.mfa(a.id));
 
   /* ---- placements: update ---- */
-  tool('update_placement', 'Update a placement (partial fields: floorCpm, floorSoft, revShare, status, houseShare, …). Set floorAuto:true to let the yield optimizer manage floorCpm + floorSoft automatically from recent clearing prices (floorAuto:false = full manual control).', { id: z.string(), fields }, (a) => client.placements.update(a.id, a.fields as UpdatePlacementRequest));
+  tool('update_placement', 'Update a placement (partial fields: floorCpm, floorSoft, revShare, status, houseShare, …). Set floorAuto:true to let the yield optimizer manage floorCpm + floorSoft automatically from recent clearing prices (floorAuto:false = full manual control). autoAds tunes auto ads on a responsive banner placement (stored at settings.auto_ads, wins over the page\'s data-max): { enabled?, max?(1-10), every?(paragraphs between ads, 2-12), min_paragraph_chars?(0-2000), exclude_paths?["/checkout*"], selectors?[css] } — null clears.', { id: z.string(), fields }, (a) => client.placements.update(a.id, a.fields as UpdatePlacementRequest));
 
   /* ---- feeds (dynamic product ads) ---- */
   tool('list_feeds', 'List product feeds.', {}, () => client.feeds.list());
@@ -452,11 +456,11 @@ export function createServer(client: AdNetClient): McpServer {
   tool('ack_alert', 'Acknowledge (mark read) an alert.', { id: z.string() }, (a) => client.automation.ackAlert(a.id));
 
   /* ---- identity resolution ---- */
-  tool('identity_resolve', 'Resolve a canonical identity from signals. fields: { email?, phone?, cookieId?, deviceId? }.', { fields }, (a) => client.identity.resolve(a.fields as Parameters<typeof client.identity.resolve>[0]));
-  tool('identity_link', 'Link signals to a canonical id. fields: { canonicalId, signals: [{type,value}] }.', { fields }, (a) => client.identity.link(a.fields as Parameters<typeof client.identity.link>[0]));
-  tool('identity_consent', 'Set consent for a canonical id. fields: { canonicalId, state: granted|denied }.', { fields }, (a) => client.identity.setConsent(a.fields as Parameters<typeof client.identity.setConsent>[0]));
-  tool('identity_stats', 'Identity graph stats.', {}, () => client.identity.stats());
-  tool('get_identity', 'Get an identity record by canonical id.', { canonicalId: z.string() }, (a) => client.identity.get(a.canonicalId));
+  tool('identity_resolve', 'Resolve a canonical identity from signals (shared graph; you become an owner of the signals you supply, and only your own signals are returned; unifiedId is per-advertiser, not comparable across accounts). fields: { email?, phone?, cookieId?, deviceId? }.', { fields }, (a) => client.identity.resolve(a.fields as Parameters<typeof client.identity.resolve>[0]));
+  tool('identity_link', 'Link signals to a canonical id you own (404 otherwise; 409 if a signal sits on another identity and you never supplied it). fields: { canonicalId, signals: [{type,value}] }.', { fields }, (a) => client.identity.link(a.fields as Parameters<typeof client.identity.link>[0]));
+  tool('identity_consent', 'Set consent for a canonical id you own (404 otherwise). fields: { canonicalId, state: granted|denied }.', { fields }, (a) => client.identity.setConsent(a.fields as Parameters<typeof client.identity.setConsent>[0]));
+  tool('identity_stats', 'Identity stats for your own identities/signals (admins: graph-wide).', {}, () => client.identity.stats());
+  tool('get_identity', 'Get an identity you own by canonical id, with only the signals you supplied (404 if you own none of its signals).', { canonicalId: z.string() }, (a) => client.identity.get(a.canonicalId));
 
   /* ---- publisher apps (mobile / CTV) ---- */
   tool('list_apps', 'List publisher mobile/CTV apps.', {}, () => client.apps.list());
@@ -558,7 +562,8 @@ export function createServer(client: AdNetClient): McpServer {
   );
 
   /* ---- webhooks ---- */
-  tool('list_webhooks', 'List webhook subscriptions.', {}, () => client.webhooks.list());
+  tool('list_webhooks', 'List webhook subscriptions (secrets omitted: has_secret + secret_hint only).', {}, () => client.webhooks.list());
+  tool('reveal_webhook_secret', 'Return a webhook endpoint\'s HMAC signing secret (whsec_...).', { id: z.string() }, (a) => client.webhooks.revealSecret(a.id));
   tool('list_webhook_events', 'List available webhook event types.', {}, () => client.webhooks.events());
   tool('create_webhook', 'Subscribe to webhook events. fields: { url (https), events: [...] }.', { fields }, (a) => client.webhooks.create(a.fields as CreateWebhookRequest));
   tool('delete_webhook', 'Delete a webhook subscription.', { id: z.string() }, (a) => client.webhooks.delete(a.id));
@@ -577,6 +582,8 @@ export function createServer(client: AdNetClient): McpServer {
   tool('disconnect_provider', 'Disconnect a linked social-login provider.', { provider: z.string() }, (a) => client.auth.disconnect(a.provider));
   tool('set_password', 'Set or change the account password. Omit currentPassword when the account is SSO-only (setting a password for the first time so email+password login also works); required when changing an existing password.', { newPassword: z.string(), currentPassword: z.string().optional() }, (a) => client.auth.setPassword(a.newPassword, a.currentPassword));
   tool('list_referrals', 'Referral program overview.', {}, () => client.referrals.list());
+  tool('get_affiliate', 'Refer & earn (Referalli affiliate program): joined?, ?via= link, clicks, sign-ups, commissions pending/credited, terms.', {}, () => client.referrals.affiliate());
+  tool('join_affiliate', 'Join Refer & earn: enroll this account as an affiliate and get its ?via= link (idempotent).', {}, () => client.referrals.joinAffiliate());
 
   /* ---- regions (public discovery) ---- */
   tool('list_regions', 'List active edge regions.', {}, () => client.regions.list());
@@ -600,6 +607,9 @@ export function createServer(client: AdNetClient): McpServer {
   tool('admin_get_config', 'Get platform config / feature flags.', {}, () => client.admin.getConfig());
   tool('admin_set_config', 'Set a platform config value.', { key: z.string(), value: z.any().optional() }, (a) => client.admin.setConfig(a.key, a.value));
   tool('admin_audit_log', 'Recent admin audit-log entries.', {}, () => client.admin.audit());
+  tool('admin_trust_properties', 'Properties with trust tier, lock, detected niches and progress toward auto-promotion. q filters by domain/name.', { q: z.string().optional(), limit: z.number().optional() }, (a) => client.admin.trustProperties(a));
+  tool('admin_set_property_trust', "Override a property's trust tier (trusted = full demand, unverified = CPA-only) and lock it against automatic changes.", { id: z.string(), tier: z.enum(['trusted', 'unverified']).optional(), locked: z.boolean(), note: z.string().optional() }, (a) => client.admin.setPropertyTrust(a.id, { tier: a.tier, locked: a.locked, note: a.note }));
+  tool('admin_trust_events', 'Trust audit log: auto promotions/demotions, domain resets and admin overrides, with metrics.', { propertyId: z.string().optional(), limit: z.number().optional() }, (a) => client.admin.trustEvents(a));
   tool('admin_mfa_ranking', 'Properties ranked by Made-For-Advertising risk.', { limit: z.number().optional() }, (a) => client.admin.mfaRanking(a.limit));
   tool('admin_create_region', 'Create an edge region. fields: { code, name, public_endpoint, lat, lng, country_codes?, status?, priority? }.', { fields }, (a) => client.admin.createRegion(a.fields as Parameters<typeof client.admin.createRegion>[0]));
   tool('admin_update_region', 'Update an edge region. fields: { status?, public_endpoint?, priority?, country_codes?, name? }.', { id: z.string(), fields }, (a) => client.admin.updateRegion(a.id, a.fields as Record<string, unknown>));
