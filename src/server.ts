@@ -307,6 +307,7 @@ export function createServer(client: AdNetClient): McpServer {
       tcfPurpose: z.number().optional().describe('TCF purpose required for ads (default 1 = storage).'),
       tcfVendorId: z.number().optional().describe('Our IAB vendor id to require in the TCF string (optional).'),
       contextualWithoutConsent: z.boolean().optional().describe('Ads always load: visitors who have not answered (or rejected) the CMP get contextual ads with no identifier; personalized still waits for consent.'),
+      enhancedCapping: z.boolean().optional().describe('Enhanced frequency capping: outside the EEA/UK, for visitors with no opt-out signal (GPC, US-privacy opt-out), contextual frequency caps also use browser signals and an SDK canvas hash (daily-rotating, per-site, never stored on the device). Off: caps use IP + user agent only and unusual contextual traffic is not served. Declare it in your privacy policy if you turn it on.'),
     },
     (a) => client.consent.saveConfig(a),
   );
