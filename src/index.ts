@@ -38,10 +38,10 @@ const saved: CliConfig = process.env.ADVIVERSE_API_KEY ? {} : cliConfig();
 const apiKey = process.env.ADVIVERSE_API_KEY || saved.api_key;
 const baseUrl = process.env.ADVIVERSE_BASE_URL || saved.base_url || 'https://adviverse.com';
 if (!apiKey) {
+  // Still start: the agent_signup tool creates an account and sets its key for this session.
   console.error(
-    `No API key: set ADVIVERSE_API_KEY (Settings → API keys) or run \`adviverse login\` (looked in ${cliConfigPath()}).`,
+    `No API key (ADVIVERSE_API_KEY, or \`adviverse login\` → ${cliConfigPath()}); only agent_signup works until one is set.`,
   );
-  process.exit(1);
 }
 if (saved.expires_at && Date.parse(saved.expires_at) < Date.now()) {
   console.error(`The saved CLI key expired at ${saved.expires_at}; run \`adviverse login\` again.`);

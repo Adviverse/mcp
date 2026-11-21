@@ -34,6 +34,7 @@ import type {
   CreatePortalConfigRequest,
   FundPoolRequest,
   CreateOnchainPoolRequest,
+  AgentSignupRequest,
 } from '@adviverse/sdk';
 
 type Result = { content: { type: 'text'; text: string }[]; isError?: boolean };
@@ -87,6 +88,8 @@ export function createServer(client: AdNetClient): McpServer {
 
   /* ---- account ---- */
   tool('whoami', 'Return the account the API key belongs to.', {}, () => client.auth.me());
+  tool('agent_signup', 'No account yet? Create one headlessly (no captcha/browser/password) and start using its API key in this session. The owner gets a verification email; payouts wait for it. fields: { email, type?: advertiser|publisher, companyName?, country?, scopes?, expiresInDays? }.', { fields: z.object({ email: z.string() }).passthrough() },
+    async (a) => { const r = await client.auth.agentSignup(a.fields as AgentSignupRequest); client.setApiKey(r.apiKey.key); return r; });
   tool('public_stats', 'Public network stats: total ads served and total paid out (Redis-cached).', {}, () => client.stats.public());
 
   /* ---- campaigns (advertiser) ---- */
