@@ -25,7 +25,7 @@ The server reads it from the environment:
 
 | Env var | Required | Default |
 |---|---|---|
-| `ADVIVERSE_API_KEY` | yes | — (`ak_<prefix>.<secret>`) |
+| `ADVIVERSE_API_KEY` | yes, unless you ran `adviverse login` (then the CLI's saved key is used) | — (`ak_<prefix>.<secret>`) |
 | `ADVIVERSE_BASE_URL` | no | `https://adviverse.com` |
 
 A read-only key makes every mutating tool return a `403 missing scope: write` —

@@ -20,6 +20,7 @@ import type {
   VerificationSettings,
   CreateAutomationRuleRequest,
   CreateAppRequest,
+  UpdateAppRequest,
   ReportQuery,
   CreateWebhookRequest,
   CreateApiKeyRequest,
@@ -142,14 +143,14 @@ export function createServer(client: AdNetClient): McpServer {
 
   /* ---- placements ---- */
   tool('list_placements', 'List ad placements. has_signing_secret says whether signed-tag enforcement is on (the secret itself is only returned by rotate_placement_signing_secret).', page, (a) => client.placements.list(a));
-  tool('create_placement', 'Create a placement. fields: { propertyId, name, format, floorCpm, … }.', { fields, idempotencyKey: idem }, (a) => client.placements.create(a.fields as CreatePlacementRequest, a.idempotencyKey));
+  tool('create_placement', 'Create a placement. fields: { propertyId | appId (exactly one; an app id from list_apps works), name, format, floorCpm, … }. Apps accept banner, native, interstitial, rewarded, app_open, video, audio, carousel, pod, direct_link (no popunder/social_bar/in_page_push).', { fields, idempotencyKey: idem }, (a) => client.placements.create(a.fields as CreatePlacementRequest, a.idempotencyKey));
   tool('get_placement_tag', 'Get the ad tag / install code for a placement (responsive banners also return autoAdsScript, the one-line site-wide auto-ads tag).', { id: z.string() }, (a) => client.placements.tag(a.id));
   tool('rotate_placement_signing_secret', 'Generate/rotate a placement signing secret (Layer 3, returned once). With a secret set, the engine only serves /terminal requests carrying a valid HMAC signature.', { id: z.string() }, (a) => client.placements.rotateSigningSecret(a.id));
   tool('disable_placement_signing', 'Disable signed-tag enforcement on a placement.', { id: z.string() }, (a) => client.placements.disableSigning(a.id));
 
   /* ---- combos (layout presets — provision several placements + one embed snippet) ---- */
   tool('list_combo_presets', 'List the static combo / layout presets (each bundles several ad units: standard_combo, leaderboard_pop, social_push, sticky_interstitial, full_monetization).', {}, () => client.placements.comboPresets());
-  tool('create_combo', 'Provision several ad units as placements on a property at once and get ONE combined embed snippet back (paste once before </body>). Provide EITHER a preset (presetKey) OR a custom set of units [{format,label?,width?,height?}]. fields: { presetKey?, units?, namePrefix?, floorCpm?, revShare?, auctionType?, passbackUrl?, houseOnly?, houseShare?, houseBackfill?, floorFallback? }.', { propertyId: z.string(), fields }, (a) => client.placements.createCombo(a.propertyId, a.fields as CreateComboRequest));
+  tool('create_combo', 'Provision several ad units as placements on a property at once and get ONE combined embed snippet back (paste once before </body>). propertyId may be an app id; on apps use presetKey in_app (banner + interstitial), web-only presets are refused. Provide EITHER a preset (presetKey) OR a custom set of units [{format,label?,width?,height?}]. fields: { presetKey?, units?, namePrefix?, floorCpm?, revShare?, auctionType?, passbackUrl?, houseOnly?, houseShare?, houseBackfill?, floorFallback? }.', { propertyId: z.string(), fields }, (a) => client.placements.createCombo(a.propertyId, a.fields as CreateComboRequest));
 
   /* ---- finance (read-only) ---- */
   tool('get_balance', "Get the account balance (available / held). The balance currency may be a tenant's own platform-token code (not an ISO code).", {}, () => client.finance.balance());
@@ -404,14 +405,14 @@ export function createServer(client: AdNetClient): McpServer {
   tool('track_event', 'Ingest a pixel event server-side (same payload pixel.js sends). fields = event object.', { fields }, (a) => client.track.event(a.fields as Record<string, unknown>));
 
   /* ---- billing & invoices ---- */
-  tool('list_invoices', 'List invoices (advertiser sees own; admin can pass accountId).', { accountId: z.string().optional() }, (a) => client.billing.invoices({ accountId: a.accountId }));
-  tool('get_invoice', 'Get one invoice by id.', { id: z.string() }, (a) => client.billing.invoice(a.id));
+  tool('list_billing_invoices', 'List platform billing invoices (advertiser sees own; admin can pass accountId).', { accountId: z.string().optional() }, (a) => client.billing.invoices({ accountId: a.accountId }));
+  tool('get_billing_invoice', 'Get one platform billing invoice by id.', { id: z.string() }, (a) => client.billing.invoice(a.id));
   tool('get_statement', 'Account financial statement (opening/charges/payments/closing).', { from: z.string().optional(), to: z.string().optional(), accountId: z.string().optional() }, (a) => client.billing.statement(a));
   tool('render_invoice', 'Rendered HTML of an invoice.', { id: z.string() }, (a) => client.billing.renderInvoice(a.id));
   tool('generate_invoice', 'Generate a draft invoice for an account+period (admin).', { accountId: z.string(), periodStart: z.string(), periodEnd: z.string() }, (a) => client.billing.generateInvoice(a));
   tool('issue_invoice', 'Issue a draft invoice (admin).', { id: z.string() }, (a) => client.billing.issueInvoice(a.id));
   tool('pay_invoice', 'Pay an invoice (advertiser own; admin any).', { id: z.string() }, (a) => client.billing.payInvoice(a.id));
-  tool('void_invoice', 'Void an invoice (admin).', { id: z.string() }, (a) => client.billing.voidInvoice(a.id));
+  tool('void_billing_invoice', 'Void a platform billing invoice (admin).', { id: z.string() }, (a) => client.billing.voidInvoice(a.id));
 
   /* ---- finance writes (funding) ---- */
   tool('deposit_funds', "Request a deposit / account top-up. fields: { amount, provider?: stripe|card|paypal|crypto|wire|paxum|mock, currency? }. card=Stripe card checkout; wire/paxum are instruction-based — the response carries where to send funds + a reference, and the balance is credited once receipt is confirmed. Accounts on a tenant network transact in that tenant's own platform token: currency is the token code and amount is denominated in it.", { fields }, (a) => client.finance.deposit(a.fields as DepositRequest));
@@ -468,8 +469,10 @@ export function createServer(client: AdNetClient): McpServer {
   /* ---- publisher apps (mobile / CTV) ---- */
   tool('list_apps', 'List publisher mobile/CTV apps.', {}, () => client.apps.list());
   tool('get_app', 'Get one app by id.', { id: z.string() }, (a) => client.apps.get(a.id));
-  tool('create_app', 'Register a mobile/CTV app. fields: { kind: mobile_app|ctv, name, bundleId, platform, storeUrl?, appStoreId?, category?, ctvMeta? }.', { fields }, (a) => client.apps.create(a.fields as CreateAppRequest));
-  tool('update_app', 'Update an app. fields: { appAdsTxt?, skadnetworkIds?, ctvMeta?, storeUrl?, platform? }.', { id: z.string(), fields }, (a) => client.apps.update(a.id, a.fields as Record<string, unknown>));
+  tool('create_app', 'Register a mobile/CTV app. fields: { kind: mobile_app|ctv, name, bundleId, platform, storeUrl?, appStoreId?, category?, ctvMeta?, developerPropertyId? (your website property whose /app-ads.txt proves the app) }. Starts pending; then verify_app. Test tag tk_test fills before verification.', { fields }, (a) => client.apps.create(a.fields as CreateAppRequest));
+  tool('update_app', 'Update an app. fields: { appAdsTxt?, skadnetworkIds?, ctvMeta?, storeUrl?, platform?, developerPropertyId? (website property id; null unlinks) }.', { id: z.string(), fields }, (a) => client.apps.update(a.id, a.fields as UpdateAppRequest));
+  tool('delete_app', 'Delete an app (soft-deletes it and its placements).', { id: z.string() }, (a) => client.apps.delete(a.id));
+  tool('verify_app', "Verify an app. developer_site (default): the linked, verified developer website must serve /app-ads.txt with 'adviverse.com, <your account id>, DIRECT' (see get_app_ads_txt). store_listing: also checks the apps.apple.com / play.google.com listing. On failure returns error + message saying what to fix.", { id: z.string(), method: z.enum(['developer_site', 'store_listing']).optional() }, (a) => client.apps.verify(a.id, a.method));
   tool('get_app_ads_txt', "An app's generated app-ads.txt content.", { id: z.string() }, (a) => client.apps.appAdsTxt(a.id));
 
   /* ---- reporting: advanced ---- */
