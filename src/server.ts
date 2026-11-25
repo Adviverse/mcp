@@ -36,7 +36,10 @@ import type {
   CreateOnchainPoolRequest,
   AgentSignupRequest,
 } from '@adviverse/sdk';
-
+import { registerCpaGoalTools } from './tools-cpa-goals.js';
+import { registerPublisherTools, reportFilters, reportQuery } from './tools-publisher.js';
+import { registerBuyingTools } from './tools-buying.js';
+import { registerDspTools } from './tools-dsp.js';
 type Result = { content: { type: 'text'; text: string }[]; isError?: boolean };
 const ok = (data: unknown): Result => ({
   content: [{ type: 'text', text: JSON.stringify(data ?? { ok: true }, null, 2) }],
@@ -48,11 +51,6 @@ const page = {
   offset: z.number().optional().describe('Rows to skip (for paging).'),
 };
 const idem = z.string().optional().describe('Idempotency-Key: reuse to make a retried create safe (no duplicate).');
-const reportQuery = {
-  from: z.string().optional().describe('ISO date/datetime, inclusive start'),
-  to: z.string().optional().describe('ISO date/datetime, inclusive end'),
-  dim: z.string().optional().describe("Group-by dimension, e.g. 'day', 'geo', 'device'"),
-};
 
 /**
  * Build an MCP server bound to a given API client. One per stdio process or, for
@@ -146,7 +144,7 @@ export function createServer(client: AdNetClient): McpServer {
 
   /* ---- placements ---- */
   tool('list_placements', 'List ad placements. has_signing_secret says whether signed-tag enforcement is on (the secret itself is only returned by rotate_placement_signing_secret).', page, (a) => client.placements.list(a));
-  tool('create_placement', 'Create a placement. fields: { propertyId | appId (exactly one; an app id from list_apps works), name, format, floorCpm, … }. Apps accept banner, native, interstitial, rewarded, app_open, video, audio, carousel, pod, direct_link (no popunder/social_bar/in_page_push).', { fields, idempotencyKey: idem }, (a) => client.placements.create(a.fields as CreatePlacementRequest, a.idempotencyKey));
+  tool('create_placement', 'Create a placement. fields: { propertyId | appId (exactly one; an app id from list_apps works — a direct_link may omit both, see create_smartlink), name, format, floorCpm, trafficType? (direct_link only), … }. Apps accept banner, native, interstitial, rewarded, app_open, video, audio, carousel, pod, direct_link (no popunder/social_bar/in_page_push). Optional render: per-format skin/template/native styling/caps — see update_placement.', { fields, idempotencyKey: idem }, (a) => client.placements.create(a.fields as CreatePlacementRequest, a.idempotencyKey));
   tool('delete_placement', 'Delete a placement (its tag stops serving). Placement names are unique per property.', { id: z.string() }, (a) => client.placements.remove(a.id));
   tool('get_placement_tag', 'Get the ad tag / install code for a placement (responsive banners also return autoAdsScript, the one-line site-wide auto-ads tag).', { id: z.string() }, (a) => client.placements.tag(a.id));
   tool('rotate_placement_signing_secret', 'Generate/rotate a placement signing secret (Layer 3, returned once). With a secret set, the engine only serves /terminal requests carrying a valid HMAC signature.', { id: z.string() }, (a) => client.placements.rotateSigningSecret(a.id));
@@ -162,8 +160,8 @@ export function createServer(client: AdNetClient): McpServer {
 
   /* ---- reporting ---- */
   tool('advertiser_report', 'Advertiser spend/performance report.', reportQuery, (a) => client.reporting.advertiser(a as ReportQuery));
-  tool('publisher_report', 'Publisher revenue/delivery report.', reportQuery, (a) => client.reporting.publisher(a as ReportQuery));
-  tool('publisher_placements_report', 'Per-placement publisher rollup: impressions, clicks, CTR, revenue, RPM, eCPM, fill rate, paid fill rate (paid_fill_rate: house/self-promo fills excluded), viewable rate, and layout shift the slot causes (cls_avg per measured impression, cls_poor_rate = share with CLS > 0.1; reserve the slot box size to fix).', reportQuery, (a) => client.reporting.publisherPlacements(a as ReportQuery));
+  tool('publisher_report', 'Publisher revenue/delivery report (dim=day|hour|geo|device|format|placement_id|campaign_id), narrowed by any combination of filters.', { ...reportQuery, ...reportFilters }, (a) => client.reporting.publisher(a as ReportQuery));
+  tool('publisher_placements_report', 'Per-placement publisher rollup: impressions, clicks, CTR, revenue, RPM, eCPM, fill rate, paid fill rate (paid_fill_rate: house/self-promo fills excluded), viewable rate, and layout shift the slot causes (cls_avg per measured impression, cls_poor_rate = share with CLS > 0.1; reserve the slot box size to fix). Accepts the combinable filters.', { ...reportQuery, ...reportFilters }, (a) => client.reporting.publisherPlacements(a as ReportQuery));
   tool('publisher_fill_report', 'Publisher fill summary: requests, filled, fill_rate, paid_filled + paid_fill_rate (paid demand only, house/self-promo excluded; rates are %), and no-fill counts by reason.', reportQuery, (a) => client.reporting.publisherFill(a as ReportQuery));
   tool('anti_adblock_report', 'Anti-adblock: impressions recovered from visitors running an adblocker (served first-party), with daily series + recovered %.', reportQuery, (a) => client.reporting.antiAdblock(a as ReportQuery));
 
@@ -345,8 +343,6 @@ export function createServer(client: AdNetClient): McpServer {
   /* ---- campaigns: targeting / brand-safety / bids / conversion config ---- */
   tool('get_campaign_targeting', "Get a campaign's resolved targeting configuration.", { id: z.string() }, (a) => client.campaigns.targeting(a.id));
   tool('set_campaign_brand_safety', 'Set brand-safety rules for a campaign. fields: { categories?, keywords?, domains?, sensitivity?, options? }.', { id: z.string(), fields }, (a) => client.campaigns.setBrandSafety(a.id, a.fields as BrandSafetyConfig));
-  tool('bid_recommendation', 'Recommended bid range for a format (optionally scoped to a geo), from recent clearing prices.', { format: z.string(), geo: z.string().optional() }, (a) => client.campaigns.bidRecommendation({ format: a.format, geo: a.geo }));
-  tool('reach_estimate', 'Estimate reach for a targeting spec. fields = the targeting body.', { fields }, (a) => client.campaigns.reachEstimate(a.fields));
   tool('get_conversion_config', "Get a campaign's conversion-tracking config.", { id: z.string() }, (a) => client.campaigns.getConversionConfig(a.id));
   tool('set_conversion_config', "Set a campaign's conversion-tracking config (fields = config body).", { id: z.string(), fields }, (a) => client.campaigns.setConversionConfig(a.id, a.fields));
 
@@ -391,7 +387,7 @@ export function createServer(client: AdNetClient): McpServer {
   tool('property_mfa_score', "A property's Made-For-Advertising quality score + guidance.", { id: z.string() }, (a) => client.properties.mfa(a.id));
 
   /* ---- placements: update ---- */
-  tool('update_placement', 'Update a placement (partial fields: width, height (banner size px), floorCpm, floorSoft, revShare, status, houseShare, noBackfill (true = empty slot instead of an Adviverse promo ad when nothing paid fills), frequencyCap {impressions, windowSeconds} — {} or null removes it, …). Set floorAuto:true to let the yield optimizer manage floorCpm + floorSoft automatically from recent clearing prices (floorAuto:false = full manual control). autoAds tunes auto ads on a responsive banner placement (stored at settings.auto_ads, wins over the page\'s data-max): { enabled?, max?(1-10), every?(paragraphs between ads, 2-12), min_paragraph_chars?(0-2000), exclude_paths?["/checkout*"], selectors?[css] } — null clears.', { id: z.string(), fields }, (a) => client.placements.update(a.id, a.fields as UpdatePlacementRequest));
+  tool('update_placement', 'Update a placement (partial fields: width, height (banner size px), floorCpm, floorSoft, revShare, status, houseShare, noBackfill (true = empty slot instead of an Adviverse promo ad when nothing paid fills), frequencyCap {impressions, windowSeconds} — {} or null removes it, …). Set floorAuto:true to let the yield optimizer manage floorCpm + floorSoft automatically from recent clearing prices (floorAuto:false = full manual control). autoAds tunes auto ads on a responsive banner placement (stored at settings.auto_ads, wins over the page\'s data-max): { enabled?, max?(1-10), every?(paragraphs between ads, 2-12), min_paragraph_chars?(0-2000), exclude_paths?["/checkout*"], selectors?[css] } — null clears. render sets per-format look + client caps (merged into settings; 400 on a key the format does not take; numbers clamped): social_bar { skin: bar|in_page_push|icon_notification|custom_widget|interstitial, position: top|bottom|top-left|top-right|bottom-left|bottom-right }; in_page_push { position: corner }; interstitial { template: card|fullscreen|split, close_delay_sec 0-15 (default 5), cover 45-100 (% of screen), freq_hours 0-720, per_session }; popunder { freq_hours, per_session } (also sets frequencyCap to 1 per freq_hours unless frequencyCap is sent); native { native: { rows 1-4, cols 1-4 (grid of ads), title_color/text_color/bg_color hex, font_size 11-20, font_family inherit|system|serif, image_position top|left } }. create_placement accepts the same render object.', { id: z.string(), fields }, (a) => client.placements.update(a.id, a.fields as UpdatePlacementRequest));
 
   /* ---- feeds (dynamic product ads) ---- */
   tool('list_feeds', 'List product feeds.', {}, () => client.feeds.list());
@@ -405,7 +401,7 @@ export function createServer(client: AdNetClient): McpServer {
   tool('send_capi_events', 'Ingest server-side conversions. Auth is the CAPI token (from rotate_capi_token), NOT the session key.', { capiToken: z.string(), events: z.array(z.any()) }, (a) => client.capi.send(a.capiToken, a.events as CapiEvent[]));
 
   /* ---- public tracking (server-side) ---- */
-  tool('track_conversion', 'Record a conversion by click id (S2S postback). fields: { clickId|click_id, value?, postbackId? }.', { fields }, (a) => client.track.conversion(a.fields as Parameters<typeof client.track.conversion>[0]));
+  tool('track_conversion', 'Record a conversion by click id (S2S postback). fields: { clickId|click_id, value?, orderId?, orderValue?, payout?, revenue? (payout/revenue = tracker conversion value aliases), postbackId? }.', { fields }, (a) => client.track.conversion(a.fields as Parameters<typeof client.track.conversion>[0]));
   tool('track_event', 'Ingest a pixel event server-side (same payload pixel.js sends). fields = event object.', { fields }, (a) => client.track.event(a.fields as Record<string, unknown>));
 
   /* ---- billing & invoices ---- */
@@ -421,7 +417,7 @@ export function createServer(client: AdNetClient): McpServer {
   /* ---- finance writes (funding) ---- */
   tool('deposit_funds', "Request a deposit / account top-up. fields: { amount, provider?: stripe|card|paypal|crypto|wire|paxum|mock, currency? }. card=Stripe card checkout; wire/paxum are instruction-based — the response carries where to send funds + a reference, and the balance is credited once receipt is confirmed. Accounts on a tenant network transact in that tenant's own platform token: currency is the token code and amount is denominated in it.", { fields }, (a) => client.finance.deposit(a.fields as DepositRequest));
   tool('list_deposits', 'List deposit history.', {}, () => client.finance.deposits());
-  tool('request_payout', 'Request a publisher payout. fields: { amount, method: crypto|paxum|wire, destination? }. crypto→OxaPay, paxum→Paxum wallet email (destination.email), wire→bank transfer (destination bank fields; settled once ops confirms it was sent).', { fields }, (a) => client.finance.requestPayout(a.fields as PayoutRequest));
+  tool('request_payout', 'Request a publisher payout. fields: { amount, method: crypto|paxum|paypal|wire, destination? }. Use get_payment_methods for the available rails and the minimum. crypto→OxaPay, paxum/paypal→wallet email (destination.email), wire→bank transfer (destination bank fields; settled once ops confirms it was sent).', { fields }, (a) => client.finance.requestPayout(a.fields as PayoutRequest));
   tool('list_payouts', 'List payout history.', {}, () => client.finance.payouts());
   tool('get_tax_form', 'Get the saved payout tax form (W-9 / W-8BEN).', {}, () => client.finance.taxForm());
   tool('list_currencies', 'List all registered platform tokens / currencies and their USD rates. Feed-backed tokens also show their live price-feed URL (rate_url), the JSON dot-path (rate_json_path), and last_rate_at (when the feed last synced usd_micro).', {}, () => client.currencies.list());
@@ -454,6 +450,10 @@ export function createServer(client: AdNetClient): McpServer {
   tool('get_verification_settings', 'Get measurement/brand-safety vendor settings.', {}, () => client.verification.settings());
   tool('save_verification_settings', 'Configure the measurement vendor. fields: { vendor?: none|ias|doubleverify|moat, measurementEnabled?, viewabilityTarget?(0-1), brandSafetyCategories?, blockedDomains?, blockedKeywords?, apiKey? }. brandSafetyCategories + blockedDomains + blockedKeywords are enforced rule-based at serve time by the ad-engine; blocked categories are auto-expanded into common keyword synonyms server-side.', { fields }, (a) => client.verification.saveSettings(a.fields as VerificationSettings));
 
+  registerCpaGoalTools(tool, client);
+  registerPublisherTools(tool, client);
+  registerBuyingTools(tool, client);
+  registerDspTools(tool, client);
   /* ---- automation & alerts ---- */
   tool('list_automation_rules', 'List automation rules.', {}, () => client.automation.rules());
   tool('create_automation_rule', 'Create an automation rule. fields: { name?, scope?: campaign|all, targetId?, metric?: cpa|ctr|spend|conversions|fill_rate, operator?: gt|lt, threshold?, windowHours?, action?: pause|resume|notify|adjust_bid, actionValue?, enabled? }.', { fields }, (a) => client.automation.createRule(a.fields as CreateAutomationRuleRequest));
@@ -482,7 +482,7 @@ export function createServer(client: AdNetClient): McpServer {
   /* ---- reporting: advanced ---- */
   tool('report_ivt', 'Invalid-traffic breakdown.', reportQuery, (a) => client.reporting.ivt(a as ReportQuery));
   tool('report_reach', 'Reach & frequency (unique users): total reach, average frequency, a frequency-distribution histogram (impressions per user), and daily unique reach.', reportQuery, (a) => client.reporting.reach(a as ReportQuery));
-  tool('report_breakdown', "Impressions/clicks/CTR/revenue/eCPM broken down by a dimension the hourly rollup drops: bdim = 'os' | 'browser' | 'deal' (PMP) | 'page' (site, by host) | 'page_url' (individual page, host+path — earnings per page) | 'app' (in-app/in-game app id — earnings per app) | 'property' (owning property) | 'region' | 'make'/'model' (device) | 'sub1'..'sub5' (affiliate sub-ids). revenue is publisher earnings or advertiser spend depending on the account. Defaults to os.", { ...reportQuery, bdim: z.enum(['os', 'browser', 'deal', 'page', 'page_url', 'app', 'property', 'region', 'make', 'model', 'sub1', 'sub2', 'sub3', 'sub4', 'sub5']).optional().describe('os | browser | deal | page | page_url | app | property') }, (a) => client.reporting.breakdown(a as ReportQuery & { bdim?: 'os' | 'browser' | 'deal' | 'page' | 'page_url' | 'app' | 'property' | 'region' | 'make' | 'model' | 'sub1' | 'sub2' | 'sub3' | 'sub4' | 'sub5' }));
+  tool('report_breakdown', "Impressions/clicks/CTR/revenue/eCPM broken down by a dimension the hourly rollup drops: bdim = 'os' | 'browser' | 'deal' (PMP) | 'page' (site, by host) | 'page_url' (individual page, host+path — earnings per page) | 'app' (in-app/in-game app id — earnings per app) | 'property' (owning property) | 'region' | 'make'/'model' (device) | 'sub1'..'sub5' (affiliate sub-ids). revenue is publisher earnings or advertiser spend depending on the account. Defaults to os. Accepts the combinable filters.", { ...reportQuery, ...reportFilters, bdim: z.enum(['os', 'browser', 'deal', 'page', 'page_url', 'app', 'property', 'region', 'make', 'model', 'sub1', 'sub2', 'sub3', 'sub4', 'sub5']).optional().describe('os | browser | deal | page | page_url | app | property') }, (a) => client.reporting.breakdown(a as ReportQuery & { bdim?: 'os' | 'browser' | 'deal' | 'page' | 'page_url' | 'app' | 'property' | 'region' | 'make' | 'model' | 'sub1' | 'sub2' | 'sub3' | 'sub4' | 'sub5' }));
   tool('report_creatives', 'Per-creative performance for the advertiser: impressions, clicks, CTR, conversions, CVR per creative, plus a daily-CTR fatigue series for the top creative.', reportQuery, (a) => client.reporting.creatives(a as ReportQuery));
   tool('report_roas', 'Advertiser ROAS / conversion-value daily trend: spend, conversions, conversion value, and ROAS (value/spend) per day.', reportQuery, (a) => client.reporting.roas(a as ReportQuery));
   tool('report_time_to_click', 'Time-to-click engagement latency: average, median, and a distribution histogram (<1s / 1-3s / 3-10s / 10-30s / 30s+).', reportQuery, (a) => client.reporting.timeToClick(a as ReportQuery));
