@@ -147,6 +147,7 @@ export function createServer(client: AdNetClient): McpServer {
   /* ---- placements ---- */
   tool('list_placements', 'List ad placements. has_signing_secret says whether signed-tag enforcement is on (the secret itself is only returned by rotate_placement_signing_secret).', page, (a) => client.placements.list(a));
   tool('create_placement', 'Create a placement. fields: { propertyId | appId (exactly one; an app id from list_apps works), name, format, floorCpm, … }. Apps accept banner, native, interstitial, rewarded, app_open, video, audio, carousel, pod, direct_link (no popunder/social_bar/in_page_push).', { fields, idempotencyKey: idem }, (a) => client.placements.create(a.fields as CreatePlacementRequest, a.idempotencyKey));
+  tool('delete_placement', 'Delete a placement (its tag stops serving). Placement names are unique per property.', { id: z.string() }, (a) => client.placements.remove(a.id));
   tool('get_placement_tag', 'Get the ad tag / install code for a placement (responsive banners also return autoAdsScript, the one-line site-wide auto-ads tag).', { id: z.string() }, (a) => client.placements.tag(a.id));
   tool('rotate_placement_signing_secret', 'Generate/rotate a placement signing secret (Layer 3, returned once). With a secret set, the engine only serves /terminal requests carrying a valid HMAC signature.', { id: z.string() }, (a) => client.placements.rotateSigningSecret(a.id));
   tool('disable_placement_signing', 'Disable signed-tag enforcement on a placement.', { id: z.string() }, (a) => client.placements.disableSigning(a.id));
@@ -390,7 +391,7 @@ export function createServer(client: AdNetClient): McpServer {
   tool('property_mfa_score', "A property's Made-For-Advertising quality score + guidance.", { id: z.string() }, (a) => client.properties.mfa(a.id));
 
   /* ---- placements: update ---- */
-  tool('update_placement', 'Update a placement (partial fields: floorCpm, floorSoft, revShare, status, houseShare, frequencyCap {impressions, windowSeconds} — {} or null removes it, …). Set floorAuto:true to let the yield optimizer manage floorCpm + floorSoft automatically from recent clearing prices (floorAuto:false = full manual control). autoAds tunes auto ads on a responsive banner placement (stored at settings.auto_ads, wins over the page\'s data-max): { enabled?, max?(1-10), every?(paragraphs between ads, 2-12), min_paragraph_chars?(0-2000), exclude_paths?["/checkout*"], selectors?[css] } — null clears.', { id: z.string(), fields }, (a) => client.placements.update(a.id, a.fields as UpdatePlacementRequest));
+  tool('update_placement', 'Update a placement (partial fields: width, height (banner size px), floorCpm, floorSoft, revShare, status, houseShare, frequencyCap {impressions, windowSeconds} — {} or null removes it, …). Set floorAuto:true to let the yield optimizer manage floorCpm + floorSoft automatically from recent clearing prices (floorAuto:false = full manual control). autoAds tunes auto ads on a responsive banner placement (stored at settings.auto_ads, wins over the page\'s data-max): { enabled?, max?(1-10), every?(paragraphs between ads, 2-12), min_paragraph_chars?(0-2000), exclude_paths?["/checkout*"], selectors?[css] } — null clears.', { id: z.string(), fields }, (a) => client.placements.update(a.id, a.fields as UpdatePlacementRequest));
 
   /* ---- feeds (dynamic product ads) ---- */
   tool('list_feeds', 'List product feeds.', {}, () => client.feeds.list());
@@ -579,7 +580,7 @@ export function createServer(client: AdNetClient): McpServer {
 
   /* ---- API keys ---- */
   tool('list_api_keys', 'List API keys.', {}, () => client.keys.list());
-  tool('create_api_key', 'Create an API key (returned once). fields: { name?, scopes?: [read|write|admin] }.', { fields }, (a) => client.keys.create(a.fields as CreateApiKeyRequest));
+  tool('create_api_key', 'Create an API key (returned once). fields: { name?, scopes?, expiresInDays? }. scopes: read | write | admin | <area>:<read|write> (e.g. publisher:read, finance:write) | <area>.<resource>:<read|write> (e.g. publisher.placements:write); write implies read. A key can only mint scopes it holds.', { fields }, (a) => client.keys.create(a.fields as CreateApiKeyRequest));
   tool('delete_api_key', 'Revoke an API key.', { id: z.string() }, (a) => client.keys.delete(a.id));
 
   /* ---- account lifecycle: KYC / onboarding / connections / referrals ---- */
